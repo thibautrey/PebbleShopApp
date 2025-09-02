@@ -45,10 +45,53 @@ Notes:
 
 ## Backlog / Nice-to-Have
 
-- [ ] Auto-refresh on interval while app is open.
-- [ ] More metrics (orders count, average order value).
-- [ ] Customizable week start (Mon/Sun) and locale-aware currency formatting.
-- [ ] Offline display of last known values.
+## Milestone 5 — Auto-Refresh
+
+- [ ] Setting: `Auto-refresh interval` (Off, 1m, 5m, 10m, 30m).
+- [ ] Implement foreground refresh loop while the app is open (AppTimer on watch + pkjs fetch coordination).
+- [ ] Pause timers on app background/exit; resume on foreground.
+- [ ] Visual cue for auto mode and update time (e.g., small "Auto" + last updated).
+- [ ] Respect Shopify rate limits; minimum 60s between requests and backoff on 429.
+
+## Milestone 6 — Metrics & AOV
+
+- [ ] Fetch order count per period via GraphQL (paid/partially_paid, exclude test/refunds as needed).
+- [ ] Compute Average Order Value (AOV = net sales / orders).
+- [ ] Extend UI to display metrics (toggle view or per-period detail screen).
+- [ ] Add settings to enable/disable extra metrics to save API calls.
+- [ ] Update `README.md` with metrics definition caveats.
+
+## Milestone 7 — Week Start & Locale Formatting
+
+- [ ] Setting: `Week starts on` (Mon/Sun) with sane default by locale.
+- [ ] Adjust date range helpers to honor week start and store timezone.
+- [ ] Locale-aware currency formatting using phone locale (Intl.NumberFormat in pkjs), with fallback.
+- [ ] Persist preferences and ensure watch/phone stay in sync.
+
+## Milestone 8 — Offline Last Known
+
+- [ ] Persist last successful totals with timestamp (watch storage + pkjs localStorage).
+- [ ] On startup or network error, show cached values with a "stale" indicator and age.
+- [ ] Manual refresh action always available; gracefully replace when fresh data arrives.
+- [ ] Validate behavior in airplane mode and intermittent connectivity.
+
+## Milestone 9 — Trends & Deltas
+
+- [ ] Cache recent history (e.g., 14 daily points, 8 weekly points).
+- [ ] Show trend arrow and percent change vs prior period (DoD: today vs yesterday, week vs last week, month vs last month).
+- [ ] Optional compact sparkline on color-capable watches; fallback to arrows/text on B/W.
+
+## Milestone 10 — Goals & Alerts
+
+- [ ] Settings: daily/weekly/monthly sales goals.
+- [ ] Highlight when a goal is reached (accent color + haptic pulse).
+- [ ] Optional phone-side notification when goals are hit; document permission requirements.
+
+## Milestone 11 — Multi-Store Profiles
+
+- [ ] Support multiple store profiles (domain + token + timezone).
+- [ ] Quick switcher on watch; per-profile cached values.
+- [ ] Securely store tokens; clear all on profile deletion.
 
 ## Work Log
 
