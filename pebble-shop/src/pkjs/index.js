@@ -23,6 +23,34 @@ Pebble.addEventListener('ready', () => {
   console.log('[pkjs] Ready.');
 });
 
+// Settings page: open and persist
+Pebble.addEventListener('showConfiguration', () => {
+  const settings = loadSettings();
+  const url = renderSettingsDataURL(settings);
+  console.log('[pkjs] Opening settings');
+  Pebble.openURL(url);
+});
+
+Pebble.addEventListener('webviewclosed', (e) => {
+  if (!e || !e.response) {
+    console.log('[pkjs] Settings closed without changes');
+    return;
+  }
+  try {
+    const data = JSON.parse(decodeURIComponent(e.response));
+    const saved = saveSettings({
+      domain: String(data.domain || '').trim(),
+      token: String(data.token || '').trim(),
+      timezone: String(data.timezone || '').trim() || undefined,
+    });
+    console.log('[pkjs] Settings saved for domain=', saved.domain);
+    // Invalidate cache when settings change
+    try { clearCache(); } catch (err) { /* noop */ }
+  } catch (err) {
+    console.warn('[pkjs] Failed to parse settings:', err);
+  }
+});
+
 Pebble.addEventListener('appmessage', (evt) => {
   const payload = evt && evt.payload ? evt.payload : {};
   const period = Number(payload.period || 0);
@@ -39,8 +67,18 @@ Pebble.addEventListener('appmessage', (evt) => {
       .catch((error) => sendError(period, error));
   }
 
+  // Try cache first (short TTL)
+  const cached = getCached(period, settings);
+  if (cached) {
+    console.log('[pkjs] Serving from cache');
+    return sendResult(period, { total: cached.total, currency: cached.currency });
+  }
+
   fetchSalesViaShopify(period, settings)
-    .then(({ total, currency }) => sendResult(period, { total, currency }))
+    .then(({ total, currency }) => {
+      try { setCached(period, settings, { total, currency }); } catch (e) { /* ignore */ }
+      sendResult(period, { total, currency });
+    })
     .catch((error) => sendError(period, error));
 });
 
@@ -227,6 +265,56 @@ async function sumOrdersTotal(domain, token, startISO, endISO) {
 
 // ----- Settings and utilities -----
 
+// Simple in-memory + localStorage cache with short TTL
+const CACHE_STORAGE_KEY = 'pebble-shop-cache-v1';
+const CACHE_TTL_MS = 120000; // 2 minutes
+
+function cacheStoreRead() {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const raw = localStorage.getItem(CACHE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function cacheStoreWrite(obj) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(obj || {}));
+    }
+  } catch (_) { /* ignore */ }
+}
+
+function clearCache() {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(CACHE_STORAGE_KEY);
+  } catch (_) { /* ignore */ }
+}
+
+function cacheKey(settings, period) {
+  const d = (settings && settings.domain) ? settings.domain : '';
+  const tz = (settings && settings.timezone) ? settings.timezone : '';
+  return `${d}|${tz}|${period}`;
+}
+
+function getCached(period, settings) {
+  const key = cacheKey(settings, period);
+  const store = cacheStoreRead();
+  const entry = store[key];
+  if (!entry || typeof entry.ts !== 'number') return null;
+  if (Date.now() - entry.ts > CACHE_TTL_MS) return null;
+  return { total: entry.total, currency: entry.currency };
+}
+
+function setCached(period, settings, value) {
+  const key = cacheKey(settings, period);
+  const store = cacheStoreRead();
+  store[key] = { total: value.total, currency: value.currency, ts: Date.now() };
+  cacheStoreWrite(store);
+}
+
 function loadSettings() {
   try {
     const raw = (typeof localStorage !== 'undefined') ? localStorage.getItem('pebble-shop-settings') : null;
@@ -239,6 +327,22 @@ function loadSettings() {
   } catch (e) {
     return { domain: '', token: '', timezone: undefined };
   }
+}
+
+function saveSettings(s) {
+  const clean = {
+    domain: (s.domain || '').replace(/^https?:\/\//i, ''),
+    token: s.token || '',
+    timezone: s.timezone || undefined,
+  };
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('pebble-shop-settings', JSON.stringify(clean));
+    }
+  } catch (e) {
+    console.warn('[pkjs] Failed to persist settings:', e);
+  }
+  return clean;
 }
 
 function currencySymbol(code) {
@@ -271,4 +375,81 @@ function fetchSalesStub(period) {
   const multiplier = [1, 5, 20][period] || 1;
   const total = (base * multiplier).toFixed(2);
   return new Promise((resolve) => setTimeout(() => resolve({ total, currency: 'USD' }), 150));
+}
+
+// ----- Settings Page (data URL) -----
+
+function renderSettingsDataURL(settings) {
+  const defaults = settings || loadSettings();
+  const tzGuess = defaults.timezone || detectLocalOffset();
+  const html = `<!doctype html>
+  <html><head><meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Pebble Shop Settings</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:16px;background:#fafafa;color:#222}
+    h1{font-size:18px;margin:0 0 12px}
+    label{display:block;font-weight:600;margin:12px 0 4px}
+    input{width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:16px}
+    .hint{font-size:12px;color:#666;margin-top:4px}
+    .row{margin:10px 0}
+    .btns{display:flex;gap:10px;margin-top:16px}
+    button{flex:1;padding:12px;border:0;border-radius:8px;font-size:16px}
+    .save{background:#0a84ff;color:#fff}
+    .cancel{background:#eee}
+  </style></head>
+  <body>
+    <h1>Shopify Connection</h1>
+    <div class="row">
+      <label for="domain">Store Domain</label>
+      <input id="domain" placeholder="my-shop.myshopify.com" value="${escapeHtml(defaults.domain)}" />
+      <div class="hint">Do not include https://</div>
+    </div>
+    <div class="row">
+      <label for="token">Admin API Access Token</label>
+      <input id="token" placeholder="shpat_..." value="${escapeHtml(defaults.token)}" />
+      <div class="hint">Scope: read_orders</div>
+    </div>
+    <div class="row">
+      <label for="timezone">Timezone Offset</label>
+      <input id="timezone" placeholder="+00:00" value="${escapeHtml(tzGuess)}" />
+      <div class="hint">Format +HH:MM or -HH:MM (optional)</div>
+    </div>
+    <div class="btns">
+      <button class="cancel" id="btn-cancel">Cancel</button>
+      <button class="save" id="btn-save">Save</button>
+    </div>
+    <script>
+      function closeWith(data){
+        document.location = 'pebblejs://close#' + encodeURIComponent(JSON.stringify(data||{}));
+      }
+      document.getElementById('btn-save').onclick=function(){
+        var d={
+          domain: document.getElementById('domain').value.trim(),
+          token: document.getElementById('token').value.trim(),
+          timezone: document.getElementById('timezone').value.trim()
+        }; closeWith(d);
+      };
+      document.getElementById('btn-cancel').onclick=function(){ closeWith({}); };
+    </script>
+  </body></html>`;
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+}
+
+function detectLocalOffset() {
+  const mins = -new Date().getTimezoneOffset();
+  const sign = mins >= 0 ? '+' : '-';
+  const abs = Math.abs(mins);
+  const hh = String(Math.floor(abs/60)).padStart(2,'0');
+  const mm = String(abs%60).padStart(2,'0');
+  return sign + hh + ':' + mm;
+}
+
+function escapeHtml(s) {
+  return String(s||'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
 }

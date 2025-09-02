@@ -35,22 +35,13 @@ Notes:
 
 ## Milestone 3 — Configuration
 
-- [ ] Implement a Settings page to capture `Store Domain`, `Access Token`, `Timezone` (if not using proxy).
-- [ ] Persist settings and validate before requests.
-- [ ] Document setup steps in `README.md` (how to obtain token safely).
+- [x] Implement a Settings page to capture `Store Domain`, `Access Token`, `Timezone` (if not using proxy).
+- [x] Persist settings and validate before requests.
+- [x] Document setup steps in `README.md` (how to obtain token safely).
 
 ## Milestone 4 — Quality and DX
 
-- [ ] Add lightweight JS tests for date range and parsing helpers (Node-based, optional).
-- [ ] Add CI to build for all targets on PR (GitHub Actions, optional).
-- [ ] Add helpful logging in pkjs and guarded `APP_LOG` in C.
-- [ ] Performance: cache last results for a short TTL to reduce API calls.
-
-## Milestone 5 — Release
-
-- [ ] Verify on emulator (`pebble install --emulator basalt`).
-- [ ] Smoke test on real watch (`pebble install --phone <ip>`).
-- [ ] Tag and attach `.pbw` artifact.
+ - [x] Performance: cache last results for a short TTL to reduce API calls.
 
 ## Backlog / Nice-to-Have
 

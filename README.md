@@ -62,3 +62,31 @@ pebble install --phone <phone-ip>
 ```
 
 Refer to the [CoreDevices SDK documentation](https://github.com/coredevices/sdk-docs) for detailed usage and additional information.
+
+## App Configuration
+
+Open the app settings from the Pebble mobile app. The settings page captures:
+
+- Store Domain: your Shopify domain, e.g. `my-shop.myshopify.com` (no `https://`).
+- Admin API Access Token: a token with `read_orders` scope.
+- Timezone Offset: optional `+HH:MM` or `-HH:MM` to align date ranges with your store timezone. Defaults to the phone’s timezone.
+
+After saving, the watch app requests totals again. If settings are incomplete, pkjs returns stub values so you can still verify the UI.
+
+## Performance & Caching
+
+- The phone-side script (pkjs) caches the last totals per period for a short TTL (about 2 minutes) in `localStorage` to reduce Shopify API calls.
+- If a cached value is fresh, the app serves it immediately without a network request.
+- Saving new settings clears the cache.
+
+## Getting a Shopify Admin API Token (safely)
+
+1. In Shopify Admin, go to Settings → Apps and sales channels → Develop apps.
+2. Create a new custom app (or use an existing one) and configure Admin API scopes.
+3. Enable at least: `read_orders`.
+4. Install the app to your store and copy the Admin API access token.
+
+Security notes:
+
+- Treat the token as a secret. Do not commit it to the repo.
+- For production, consider using a minimal proxy service to avoid embedding long‑lived tokens on devices. This repo supports direct-from-pkjs for simplicity, but a proxy is recommended for tighter control and auditability.
