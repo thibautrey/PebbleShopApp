@@ -1,0 +1,34 @@
+{
+  "name": "pebble-shop",
+  "author": "MakeAwesomeHappen",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "pebble-shop",
+    "uuid": "4aa4b6c6-4e9a-4405-b5fc-2a59b283f894",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "period",
+      "total",
+      "currency",
+      "status",
+      "error"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}
