@@ -1,0 +1,7 @@
+# Ignore build artifacts and node modules
+build/
+node_modules/
+.pbw
+
+# Misc
+.DS_Store
