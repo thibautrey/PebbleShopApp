@@ -118,7 +118,7 @@ static uint16_t menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t secti
 }
 
 static int16_t menu_get_header_height_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
-  return MENU_HEADER_HEIGHT;
+  return MENU_CELL_BASIC_HEADER_HEIGHT;
 }
 
 static void menu_draw_header_callback(GContext *ctx, const Layer *cell_layer, uint16_t section_index, void *data) {
@@ -176,7 +176,6 @@ static void prv_window_unload(Window *window) {
 
 static void prv_init(void) {
   s_window = window_create();
-  window_set_click_config_provider(s_window, prv_click_config_provider);
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load = prv_window_load,
     .unload = prv_window_unload,

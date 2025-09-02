@@ -82,16 +82,22 @@ Pebble.addEventListener('appmessage', (evt) => {
     .catch((error) => sendError(period, error));
 });
 
-// ----- Network scaffold (to be implemented in Milestone 1) -----
+// ----- Network scaffold (Promise-based for pkjs compatibility) -----
 
-async function fetchSalesViaShopify(period, settings) {
-  const { domain, token, timezone } = settings;
+function fetchSalesViaShopify(period, settings) {
+  const domain = settings.domain;
+  const token = settings.token;
+  const timezone = settings.timezone;
   const now = new Date();
-  const { start, end } = dateRangeISO(period, now, timezone);
-  const shopCurrency = await getShopCurrency(domain, token);
-  const total = await sumOrdersTotal(domain, token, start, end);
-  const currency = currencySymbol(shopCurrency) || shopCurrency || 'USD';
-  return { total: Number(total).toFixed(2), currency };
+  const range = dateRangeISO(period, now, timezone);
+  return getShopCurrency(domain, token)
+    .then(function(shopCurrency) {
+      return sumOrdersTotal(domain, token, range.start, range.end)
+        .then(function(total) {
+          const currency = currencySymbol(shopCurrency) || shopCurrency || 'USD';
+          return { total: Number(total).toFixed(2), currency: currency };
+        });
+    });
 }
 
 // ----- Date range helpers -----
@@ -158,58 +164,55 @@ function toIsoWithOffset(date, tzOffsetStr) {
 
 // ----- Shopify GraphQL helpers -----
 
-async function requestShopify(domain, token, query, variables) {
+function requestShopify(domain, token, query, variables) {
   const url = `https://${domain}/admin/api/2024-07/graphql.json`;
   const headers = {
     'Content-Type': 'application/json',
     'X-Shopify-Access-Token': token,
   };
-  const res = await httpPost(url, headers, { query, variables }, 12000);
-  if (res.status === 401 || res.status === 403) {
-    throw new Error('Unauthorized: check token and scopes');
-  }
-  if (res.status === 429) {
-    throw new Error('Rate limited: slow down');
-  }
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`HTTP ${res.status}`);
-  }
-  const json = res.json;
-  if (json && json.errors && json.errors.length) {
-    throw new Error(json.errors.map((e) => e.message).join('; '));
-  }
-  return json.data;
+  return httpPost(url, headers, { query: query, variables: variables }, 12000)
+    .then(function(res) {
+      if (res.status === 401 || res.status === 403) {
+        throw new Error('Unauthorized: check token and scopes');
+      }
+      if (res.status === 429) {
+        throw new Error('Rate limited: slow down');
+      }
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error('HTTP ' + res.status);
+      }
+      const json = res.json;
+      if (json && json.errors && json.errors.length) {
+        throw new Error(json.errors.map(function(e){ return e.message; }).join('; '));
+      }
+      return json.data;
+    });
 }
 
-async function httpPost(url, headers, bodyObj, timeoutMs) {
+function httpPost(url, headers, bodyObj, timeoutMs) {
   // Prefer fetch if available, fallback to XMLHttpRequest on older pkjs engines
   if (typeof fetch === 'function') {
-    const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs || 12000) : null;
-    try {
-      const res = await fetch(url, {
-        method: 'POST', headers, body: JSON.stringify(bodyObj),
-        signal: controller ? controller.signal : undefined,
+    return fetch(url, {
+      method: 'POST', headers: headers, body: JSON.stringify(bodyObj)
+    }).then(function(res) {
+      return res.json().then(function(json){
+        return { status: res.status, json: json };
       });
-      const json = await res.json();
-      return { status: res.status, json };
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
+    });
   }
 
   // XMLHttpRequest fallback
-  return new Promise((resolve, reject) => {
+  return new Promise(function(resolve, reject) {
     try {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', url, true);
       xhr.timeout = timeoutMs || 12000;
-      Object.keys(headers || {}).forEach((k) => xhr.setRequestHeader(k, headers[k]));
+      Object.keys(headers || {}).forEach(function(k){ xhr.setRequestHeader(k, headers[k]); });
       xhr.onreadystatechange = function () {
         if (xhr.readyState === 4) {
-          let json = null;
+          var json = null;
           try { json = JSON.parse(xhr.responseText); } catch (e) { json = null; }
-          resolve({ status: xhr.status, json });
+          resolve({ status: xhr.status, json: json });
         }
       };
       xhr.ontimeout = function () { reject(new Error('Network timeout')); };
@@ -221,46 +224,52 @@ async function httpPost(url, headers, bodyObj, timeoutMs) {
   });
 }
 
-async function getShopCurrency(domain, token) {
-  const q = `query ShopCurrency { shop { currencyCode } }`;
-  const data = await requestShopify(domain, token, q, {});
-  return data && data.shop && data.shop.currencyCode ? data.shop.currencyCode : 'USD';
+function getShopCurrency(domain, token) {
+  const q = 'query ShopCurrency { shop { currencyCode } }';
+  return requestShopify(domain, token, q, {})
+    .then(function(data){
+      return (data && data.shop && data.shop.currencyCode) ? data.shop.currencyCode : 'USD';
+    });
 }
 
-async function sumOrdersTotal(domain, token, startISO, endISO) {
-  let total = 0.0;
-  let after = null;
-  let pages = 0;
+function sumOrdersTotal(domain, token, startISO, endISO) {
   const pageLimit = 10; // cap pages to avoid long sessions
   const first = 100; // items per page (max 250, but keep cost lower)
   const queryStr = `created_at:>=${startISO} created_at:<=${endISO} status:any`;
 
-  while (pages < pageLimit) {
-    const q = `query OrdersTotal($first:Int!, $after:String, $query:String!) {
-      orders(first: $first, after: $after, query: $query) {
-        pageInfo { hasNextPage }
-        edges {
-          cursor
-          node {
-            totalPriceSet { shopMoney { amount currencyCode } }
-          }
-        }
-      }
-    }`;
-    const data = await requestShopify(domain, token, q, { first, after, query: queryStr });
-    const edges = data && data.orders && data.orders.edges ? data.orders.edges : [];
-    for (let i = 0; i < edges.length; i++) {
-      const node = edges[i].node;
-      const amt = node && node.totalPriceSet && node.totalPriceSet.shopMoney && node.totalPriceSet.shopMoney.amount;
-      if (amt != null) total += parseFloat(amt);
+  function loop(after, pages, total) {
+    if (pages >= pageLimit) {
+      return Promise.resolve(total);
     }
-    const hasNext = data && data.orders && data.orders.pageInfo && data.orders.pageInfo.hasNextPage;
-    if (!hasNext || edges.length === 0) break;
-    after = edges[edges.length - 1].cursor;
-    pages += 1;
+    const q = 'query OrdersTotal($first:Int!, $after:String, $query:String!) {\n' +
+      '  orders(first: $first, after: $after, query: $query) {\n' +
+      '    pageInfo { hasNextPage }\n' +
+      '    edges {\n' +
+      '      cursor\n' +
+      '      node {\n' +
+      '        totalPriceSet { shopMoney { amount currencyCode } }\n' +
+      '      }\n' +
+      '    }\n' +
+      '  }\n' +
+      '}';
+    return requestShopify(domain, token, q, { first: first, after: after, query: queryStr })
+      .then(function(data) {
+        const edges = (data && data.orders && data.orders.edges) ? data.orders.edges : [];
+        for (var i = 0; i < edges.length; i++) {
+          const node = edges[i].node;
+          const amt = node && node.totalPriceSet && node.totalPriceSet.shopMoney && node.totalPriceSet.shopMoney.amount;
+          if (amt != null) total += parseFloat(amt);
+        }
+        const hasNext = data && data.orders && data.orders.pageInfo && data.orders.pageInfo.hasNextPage;
+        if (!hasNext || edges.length === 0) {
+          return total;
+        }
+        const nextAfter = edges[edges.length - 1].cursor;
+        return loop(nextAfter, pages + 1, total);
+      });
   }
 
-  return total;
+  return loop(null, 0, 0.0);
 }
 
 // ----- Settings and utilities -----
